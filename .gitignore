@@ -1,0 +1,4 @@
+*.o
+scanner
+test.txt
+.vscode
