@@ -1,4 +1,4 @@
-### Jessica Seabolt CMP SCI 4280 Project 1 Updated 03/12/2024 ###
+### Jessica Seabolt CMP SCI 4280 Project Updated 04/11/2024 ###
 
 Lexical Analyzer (Scanner). Uses option 3, FSA Table + Driver.
     The FSA table is defined in the initFSATable() function in scanner.c.

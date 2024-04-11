@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project 1 Updated 03/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/11/2024
 
 // This line fixes the issue with strdup. I didn't need it on my machine, but it was required for the server.
 #define _POSIX_C_SOURCE 200809L
@@ -15,8 +15,8 @@ int charNumber = 1;
 int fsaTable[MAX_STATES][MAX_CHARS];
 
 // Keywords to check for
-char reservedWords[16][9] = {
-    "start", "stop", "while", "repeat", "until", "label", "return",
+char reservedWords[17][9] = {
+    "start", "stop", "while", "repeat", "until", "label", "return", "func",
     "cin", "cout", "tape", "jump", "if", "then", "pick", "create", "set"
 };
 
@@ -61,11 +61,6 @@ void initFSATable() {
     fsaTable[START][']'] = OPERATOR;
     fsaTable[START]['|'] = OPERATOR;
     fsaTable[START]['&'] = OPERATOR;
-    fsaTable[START]['!'] = OPERATOR;
-    fsaTable[OPERATOR]['='] = OPERATOR;
-    fsaTable[OPERATOR]['!'] = OPERATOR;
-    fsaTable[OPERATOR]['|'] = OPERATOR;
-    fsaTable[OPERATOR]['&'] = OPERATOR;
 }
 
 // Returns the next state given the current state and input character
@@ -143,7 +138,7 @@ Token getToken(FILE* inputFile) {
                 if (bufferIndex < MAX_TOKEN_LEN) {
                     if (c == '/') {
                         int nextChar = fgetc(inputFile);
-                        if (nextChar == '/') {
+                        if (nextChar == '/') { // Comment
                             while (c != '\n' && c != EOF) {
                                 c = fgetc(inputFile);
                                 charNumber++;
@@ -157,6 +152,62 @@ Token getToken(FILE* inputFile) {
                             continue;
                         } else {
                             ungetc(nextChar, inputFile);
+                        }
+                    }
+                    if (c == ':') {
+                        int nextChar = fgetc(inputFile);
+                        charNumber++;
+                        if (nextChar == '=') { // :=
+                            buffer[bufferIndex++] = c;
+                            c = nextChar;
+                        } else {
+                            ungetc(nextChar, inputFile);
+                            charNumber--;
+                        }
+                    }
+                    if (c == '&') {
+                        int nextChar = fgetc(inputFile);
+                        charNumber++;
+                        if (nextChar == '&') { // &&
+                            buffer[bufferIndex++] = c;
+                            c = nextChar;
+                        } else {
+                            ungetc(nextChar, inputFile);
+                            charNumber--;
+                        }
+                    }
+                    if (c == '|') {
+                        int nextChar = fgetc(inputFile);
+                        charNumber++;
+                        if (nextChar == '|') { // ||
+                            buffer[bufferIndex++] = c;
+                            c = nextChar;
+                        } else {
+                            ungetc(nextChar, inputFile);
+                            charNumber--;
+                        }
+                    }
+                    if (c == '=') {
+                        int nextChar = fgetc(inputFile);
+                        charNumber++;
+                        if (nextChar == '=') { // ==
+                            buffer[bufferIndex++] = c;
+                            c = nextChar;
+                        } else if (nextChar == '!') { // =!=
+                            int nextNextChar = fgetc(inputFile);
+                            charNumber++;
+                            if (nextNextChar == '=') {
+                                buffer[bufferIndex++] = c;
+                                buffer[bufferIndex++] = nextChar;
+                                c = nextNextChar;
+                            } else {
+                                ungetc(nextNextChar, inputFile);
+                                ungetc(nextChar, inputFile);
+                                charNumber -= 2;
+                            }
+                        } else {
+                            ungetc(nextChar, inputFile);
+                            charNumber--;
                         }
                     }
                     buffer[bufferIndex++] = c;
