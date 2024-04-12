@@ -21,5 +21,6 @@ extern int fsaTable[MAX_STATES][MAX_CHARS];
 void initFSATable();
 int getNextState(int currentState, unsigned char c);
 Token getToken(FILE* inputFile);
+void ungetToken(Token token, FILE* inputFile);
 
 #endif

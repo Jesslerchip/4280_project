@@ -1,10 +1,15 @@
-// Jessica Seabolt CMP SCI 4280 Project 1 Updated 03/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/11/2024
 
 // I tried to make this as modular as I could. 
 
 #include <stdio.h>
+#include <stdlib.h>
+#include "parser.h"
 #include "scanner.h"
 #include "testScanner.h"
+
+void printParseTree(ParseNode* node, int indent);
+void freeParseTree(ParseNode* node);
 
 int main(int argc, char *argv[]) {
     FILE *inputFile = NULL;
@@ -23,13 +28,61 @@ int main(int argc, char *argv[]) {
         inputFile = stdin;
     }
 
-    // Initialize the FSA table and scan that hecking file
+    // Initialize the FSA table
     initFSATable();
-    testScanner(inputFile);
+
+    ParseNode* parseTree = parser(inputFile);
+
+    if (parseTree != NULL) {
+        printf("Parsing successful!\n");
+        printf("Parse Tree:\n");
+        printParseTree(parseTree, 0);
+        freeParseTree(parseTree);
+    } else {
+        printf("Parsing failed!\n");
+        freeParseTree(parseTree);
+    }
 
     if (inputFile != stdin) {
         fclose(inputFile);
     }
 
     return 0;
+}
+
+void printParseTree(ParseNode* node, int indent) {
+    if (node == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < indent; i++) {
+        printf("  ");
+    }
+
+    printf("%s", node->label);
+
+    if (node->value[0] != '\0') {
+        printf(" (%s)", node->value);
+    }
+
+    printf("\n");
+
+    for (int i = 0; i < node->numChildren; i++) {
+        printParseTree(node->children[i], indent + 1);
+    }
+}
+
+void freeParseTree(ParseNode* node) {
+    if (node == NULL) {
+        printf("Attempting to free a NULL node.\n");
+        return;
+    }
+
+    printf("Freeing node: %s\n", node->label);
+
+    for (int i = 0; i < node->numChildren; i++) {
+        freeParseTree(node->children[i]);
+    }
+
+    free(node);
 }

@@ -31,9 +31,12 @@ void testScanner(FILE* inputFile) {
                 tokenTypeName = "Unknown";
                 break;
         }
-        printf("%s: %s, Line: %d, Char: %d\n", tokenTypeName, token.tokenInstance ? token.tokenInstance : "", token.lineNumber, token.charNumber);
-        if (token.tokenInstance) {
-            free(token.tokenInstance);
+        if (token.tokenID != EOF_TK) {
+            printf("%s: %s, Line: %d, Char: %d\n", tokenTypeName, token.tokenInstance ? token.tokenInstance : "", token.lineNumber, token.charNumber);
+            if (token.tokenInstance) {
+                free(token.tokenInstance);
+            }
         }
+
     } while (token.tokenID != EOF_TK);
 }
