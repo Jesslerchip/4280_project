@@ -1,7 +1,9 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 #ifndef TOKEN_H
 #define TOKEN_H
+
+#define MAX_TOKEN_LEN 256
 
 // Tokens have an ID, an instance, and a line and character number for error reporting and printing
 typedef struct {

@@ -1,14 +1,14 @@
-# Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+# Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 CC = gcc
 
 CFLAGS = -Wall -Wextra -Werror -std=c99
 
-SOURCES = main.c scanner.c parser.c
+SOURCES = main.c scanner.c parser.c stack.c
 
 OBJECTS = $(SOURCES:.c=.o)
 
-TARGET = frontEnd
+TARGET = statSem
 
 all: $(TARGET)
 

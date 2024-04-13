@@ -1,14 +1,12 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
-// This line fixes the issue with strdup. I didn't need it on my machine, but it was required for the server.
 #define _POSIX_C_SOURCE 200809L
 
 #include "scanner.h"
+#include "token.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-
-#define MAX_TOKEN_LEN 256
 
 int lineNumber = 1;
 int charNumber = 1;

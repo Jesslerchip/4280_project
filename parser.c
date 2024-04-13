@@ -1,9 +1,12 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "parser.h"
+#include "stack.h"
+
+Stack* stack = NULL;
 
 ParseNode* createNode(const char* label) {
     ParseNode* node = (ParseNode*)malloc(sizeof(ParseNode));
@@ -19,6 +22,9 @@ void addChild(ParseNode* parent, ParseNode* child) {
 }
 
 ParseNode* parser(FILE* inputFile) {
+
+    initStack(&stack);
+
     Token token = getToken(inputFile);
     
     ParseNode* root = program(&token, inputFile);
@@ -38,10 +44,13 @@ ParseNode* parser(FILE* inputFile) {
 ParseNode* program(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<program>");
 
-    ParseNode* varsNode = vars(token, inputFile);
+    int varCountGlobal = 0;
+
+    ParseNode* varsNode = vars(token, inputFile, &varCountGlobal);
     if (varsNode != NULL) {
         addChild(node, varsNode);
     }
+
     else {
         printf("PARSER ERROR: Expected 'vars' at line %d, char %d\n", token->lineNumber, token->charNumber);
         freeParseTree(node);
@@ -57,6 +66,7 @@ ParseNode* program(Token* token, FILE* inputFile) {
             if (funcNode != NULL) {
                 addChild(node, funcNode);
                 *token = getToken(inputFile);
+                varCountGlobal++;
             } else {
                 freeParseTree(node);
                 return NULL;
@@ -66,7 +76,6 @@ ParseNode* program(Token* token, FILE* inputFile) {
         ParseNode* blockNode = block(token, inputFile);
         if (blockNode != NULL) {
             addChild(node, blockNode);
-            // *token = getToken(inputFile);
         } else {
             freeParseTree(node);
             return NULL;
@@ -75,6 +84,11 @@ ParseNode* program(Token* token, FILE* inputFile) {
         printf("PARSER ERROR: Expected 'tape' keyword at line %d, char %d\n", token->lineNumber, token->charNumber);
         freeParseTree(node);
         return NULL;
+    }
+
+    for (int i = 0; i < varCountGlobal; i++) {
+        // printf("STACK: Stack top: %d, Stack item: %s\n", stack->top, stack->items[stack->top].tokenInstance);
+        pop(stack);
     }
 
     return node;
@@ -95,7 +109,16 @@ ParseNode* func(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
+    int lookup = find(stack, token->tokenInstance);
+    if (lookup != -1) {
+        printf("STACK ERROR: Identifier '%s' already found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+        freeParseTree(node);
+        exit(1);
+    }
+
     addChild(node, createNode(token->tokenInstance));
+    push(stack, token);
 
     *token = getToken(inputFile);
     ParseNode* blockNode = block(token, inputFile);
@@ -117,8 +140,11 @@ ParseNode* block(Token* token, FILE* inputFile) {
 
     ParseNode* node = createNode("<block>");
 
+    int* varCountBlock = (int*)malloc(sizeof(int));
+    *varCountBlock = 0;
+
     *token = getToken(inputFile);
-    ParseNode* varsNode = vars(token, inputFile);
+    ParseNode* varsNode = vars(token, inputFile, varCountBlock);
     
     if (varsNode != NULL) {
         addChild(node, varsNode);
@@ -144,10 +170,17 @@ ParseNode* block(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    for (int i = 0; i < *varCountBlock; i++) {
+        // printf("STACK: Stack top: %d, Stack item: %s\n", stack->top, stack->items[stack->top].tokenInstance);
+        pop(stack);
+    }
+
+    free(varCountBlock);
+
     return node;
 }
 
-ParseNode* vars(Token* token, FILE* inputFile) {
+ParseNode* vars(Token* token, FILE* inputFile, int* varCount) {
     ParseNode* node = createNode("<vars>");
 
     if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "create") == 0) {
@@ -161,7 +194,17 @@ ParseNode* vars(Token* token, FILE* inputFile) {
             return NULL;
         }
 
+        int lookup = find(stack, token->tokenInstance);
+        if (lookup != -1) {
+            printf("STACK ERROR: Identifier '%s' already found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+            freeParseTree(node);
+            exit(1);
+        }
+
         addChild(node, createNode(token->tokenInstance));
+
+        push(stack, token);
+        (*varCount)++;
 
         *token = getToken(inputFile);
 
@@ -192,7 +235,7 @@ ParseNode* vars(Token* token, FILE* inputFile) {
         *token = getToken(inputFile);
 
         if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "create") == 0) {
-            ParseNode* varsNode = vars(token, inputFile);
+            ParseNode* varsNode = vars(token, inputFile, varCount);
             if (varsNode != NULL) {
                 addChild(node, varsNode);
             }
@@ -392,6 +435,14 @@ ParseNode* R(Token* token, FILE* inputFile) {
         }
         
     } else if (token->tokenID == ID_TK) {
+
+        int lookup = find(stack, token->tokenInstance);
+        if (lookup == -1) {
+            printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+            freeParseTree(node);
+            exit(1);
+        }
+
         addChild(node, createNode(token->tokenInstance));
     } else if (token->tokenID == INT_TK) {
         addChild(node, createNode(token->tokenInstance));
@@ -632,6 +683,13 @@ ParseNode* in(Token* token, FILE* inputFile) {
         printf("PARSER ERROR: Expected identifier after 'cin' at line %d, char %d\n", token->lineNumber, token->charNumber);
         freeParseTree(node);
         return NULL;
+    }
+
+    int lookup = find(stack, token->tokenInstance);
+    if (lookup == -1) {
+        printf("STACK ERROR: Identifier '%s' not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+        freeParseTree(node);
+        exit(1);
     }
 
     addChild(node, createNode(token->tokenInstance));
@@ -884,6 +942,14 @@ ParseNode* assign(Token* token, FILE* inputFile) {
     printf("DEBUG ASSIGN: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
 
     if (token->tokenID == ID_TK) {
+
+        int lookup = find(stack, token->tokenInstance);
+        if (lookup == -1) {
+            printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+            freeParseTree(node);
+            exit(1);
+        }
+
         addChild(node, createNode(token->tokenInstance));
         *token = getToken(inputFile);
 
@@ -948,6 +1014,14 @@ ParseNode* label(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
+    int lookup = find(stack, token->tokenInstance);
+    if (lookup == -1) {
+        printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+        freeParseTree(node);
+        exit(1);
+    }
+
     addChild(node, createNode(token->tokenInstance));
 
     return node;
@@ -968,23 +1042,29 @@ ParseNode* gotoFunc(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
+    int lookup = find(stack, token->tokenInstance);
+    if (lookup == -1) {
+        printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
+        freeParseTree(node);
+        exit(1);
+    }
+
     addChild(node, createNode(token->tokenInstance));
 
     return node;
 }
 
 ParseNode* pick(Token* token, FILE* inputFile) {
-    // Check for the 'pick' keyword
+
     if (token->tokenID != KEYWORD_TK || strcmp(token->tokenInstance, "pick") != 0) {
         printf("PARSER ERROR: Expected 'pick' keyword at line %d, char %d\n", token->lineNumber, token->charNumber);
         return NULL;
     }
 
-    // Create a node for the 'pick' construct
     ParseNode* node = createNode("<pick>");
     addChild(node, createNode("pick"));
 
-    // Parse the expression after 'pick'
     *token = getToken(inputFile);
     ParseNode* exprNode = expr(token, inputFile);
     if (exprNode == NULL) {
@@ -994,7 +1074,6 @@ ParseNode* pick(Token* token, FILE* inputFile) {
     }
     addChild(node, exprNode);
 
-    // Parse the body of the 'pick' structure
     ParseNode* pickBodyNode = pickBody(inputFile);
     if (pickBodyNode == NULL) {
         printf("PARSER ERROR: Invalid or missing pick body after expression\n");
@@ -1009,10 +1088,8 @@ ParseNode* pick(Token* token, FILE* inputFile) {
 ParseNode* pickBody(FILE* inputFile) {
     ParseNode* pickBodyNode = createNode("<pickbody>");
 
-    // Get the token for the first statement
     Token token = getToken(inputFile);
 
-    // Parse the first statement
     ParseNode* firstStatNode = stat(&token, inputFile);
     if (firstStatNode == NULL) {
         printf("PARSER ERROR: Expected valid statement in pickbody\n");
@@ -1021,7 +1098,6 @@ ParseNode* pickBody(FILE* inputFile) {
     }
     addChild(pickBodyNode, firstStatNode);
 
-    // Expecting a colon as a delimiter
     token = getToken(inputFile);
     if (strcmp(token.tokenInstance, ":") != 0) {
         printf("PARSER ERROR: Expected ':' after first statement in pickbody at line %d, char %d\n", token.lineNumber, token.charNumber);
@@ -1029,7 +1105,6 @@ ParseNode* pickBody(FILE* inputFile) {
         return NULL;
     }
 
-    // Parse the second statement
     token = getToken(inputFile);
     ParseNode* secondStatNode = stat(&token, inputFile);
     if (secondStatNode == NULL) {

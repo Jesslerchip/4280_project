@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 #ifndef SCANNER_H
 #define SCANNER_H
@@ -8,6 +8,7 @@
 
 #define MAX_STATES 4
 #define MAX_CHARS 128
+#define _POSIX_C_SOURCE 200809L // For strdup
 
 // The states of the FSA. Comments don't have a state because they just get ignored. Hopefully this is okay?
 enum State {

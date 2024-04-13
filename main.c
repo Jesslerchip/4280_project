@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 // I tried to make this as modular as I could. 
 
@@ -33,9 +33,7 @@ int main(int argc, char *argv[]) {
     ParseNode* parseTree = parser(inputFile);
 
     if (parseTree != NULL) {
-        printf("Parsing successful!\n");
-        printf("Parse Tree:\n");
-        printParseTree(parseTree, 0);
+        // printParseTree(parseTree, 0);
         freeParseTree(parseTree);
     } else {
         printf("Parsing failed!\n");
@@ -50,6 +48,9 @@ int main(int argc, char *argv[]) {
 }
 
 void printParseTree(ParseNode* node, int indent) {
+
+    printf("Parsing successful!\n");
+    printf("Parse Tree:\n");
     
     if (node == NULL) {
         return;
@@ -78,7 +79,7 @@ void freeParseTree(ParseNode* node) {
         return;
     }
 
-    // printf("Freeing node: %s\n", node->label);
+    // printf("DEBUG PARSE TREE: Freeing node: %s\n", node->label);
 
     for (int i = 0; i < node->numChildren; i++) {
         freeParseTree(node->children[i]);

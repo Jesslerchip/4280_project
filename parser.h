@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
 
 #ifndef PARSER_H
 #define PARSER_H
@@ -7,7 +7,7 @@
 #include "scanner.h"
 #include "token.h"
 
-#define MAX_CHILDREN 6
+#define MAX_CHILDREN 6 // Any production rule in the grammar has at most 6 children, counting keywords and operators
 
 typedef struct ParseNode {
     char label[50];
@@ -24,7 +24,7 @@ ParseNode* parser(FILE* inputFile);
 ParseNode* program(Token* token, FILE* inputFile);
 ParseNode* func(Token* token, FILE* inputFile);
 ParseNode* block(Token* token, FILE* inputFile);
-ParseNode* vars(Token* token, FILE* inputFile);
+ParseNode* vars(Token* token, FILE* inputFile, int* varCount);
 ParseNode* expr(Token* token, FILE* inputFile);
 ParseNode* exprPrime(Token* token, FILE* inputFile);
 ParseNode* N(Token* token, FILE* inputFile);
