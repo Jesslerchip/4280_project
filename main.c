@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/11/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 04/12/2024
 
 // I tried to make this as modular as I could. 
 
@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include "parser.h"
 #include "scanner.h"
-#include "testScanner.h"
 
 void printParseTree(ParseNode* node, int indent);
 void freeParseTree(ParseNode* node);
@@ -51,6 +50,7 @@ int main(int argc, char *argv[]) {
 }
 
 void printParseTree(ParseNode* node, int indent) {
+    
     if (node == NULL) {
         return;
     }
@@ -78,7 +78,7 @@ void freeParseTree(ParseNode* node) {
         return;
     }
 
-    printf("Freeing node: %s\n", node->label);
+    // printf("Freeing node: %s\n", node->label);
 
     for (int i = 0; i < node->numChildren; i++) {
         freeParseTree(node->children[i]);

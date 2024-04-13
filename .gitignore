@@ -1,4 +1,5 @@
 *.o
 scanner
 test.txt
+frontEnd
 .vscode
