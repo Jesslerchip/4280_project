@@ -1,4 +1,4 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 05/10/2024
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -205,6 +205,26 @@ Token getToken(FILE* inputFile) {
                             int nextNextChar = fgetc(inputFile);
                             charNumber++;
                             if (nextNextChar == '=') {
+                                buffer[bufferIndex++] = c;
+                                buffer[bufferIndex++] = nextChar;
+                                c = nextNextChar;
+                            } else {
+                                ungetc(nextNextChar, inputFile);
+                                ungetc(nextChar, inputFile);
+                                charNumber -= 2;
+                            }
+                        } else {
+                            ungetc(nextChar, inputFile);
+                            charNumber--;
+                        }
+                    }
+                    if (c == '.') {
+                        int nextChar = fgetc(inputFile);
+                        charNumber++;
+                        if (nextChar == '.') { // ==
+                            int nextNextChar = fgetc(inputFile);
+                            charNumber++;
+                            if (nextNextChar == '.') {
                                 buffer[bufferIndex++] = c;
                                 buffer[bufferIndex++] = nextChar;
                                 c = nextNextChar;

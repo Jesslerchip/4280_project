@@ -1,26 +1,31 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 05/10/2024
 
 #ifndef PARSER_H
 #define PARSER_H
 
 #include <stdio.h>
+#include "parsenode.h"
 #include "scanner.h"
 #include "token.h"
 
-#define MAX_CHILDREN 6 // Any production rule in the grammar has at most 6 children, counting keywords and operators
+typedef enum {VAR, LABEL} nameType;
 
-typedef struct ParseNode {
-    char label[50];
-    char value[50];
-    struct ParseNode* children[MAX_CHILDREN];
-    int numChildren;
-} ParseNode;
+typedef struct Variable {
+    char name[255];
+    int value;
+} Variable;
+
+typedef struct JumpFunc {
+    char funcName[255];
+    char jumpName[255];
+} JumpFunc;
 
 void freeParseTree(ParseNode* node);
 
 ParseNode* createNode(const char* label);
 void addChild(ParseNode* parent, ParseNode* child);
-ParseNode* parser(FILE* inputFile);
+void initJumpLabel();
+ParseNode* parser(FILE* inputFile, FILE* outputFile);
 ParseNode* program(Token* token, FILE* inputFile);
 ParseNode* func(Token* token, FILE* inputFile);
 ParseNode* block(Token* token, FILE* inputFile);
@@ -47,5 +52,6 @@ ParseNode* label(Token* token, FILE* inputFile);
 ParseNode* gotoFunc(Token* token, FILE* inputFile);
 ParseNode* pick(Token* token, FILE* inputFile);
 ParseNode* pickBody(FILE* inputFile);
+void exprTraversal(ParseNode* node, int* hasLoaded);
 
 #endif

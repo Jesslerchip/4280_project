@@ -10,6 +10,8 @@ typedef struct Stack {
     int top;
 } Stack;
 
+extern Stack* stack;
+
 void initStack(Stack** stack);
 void push(Stack* stack, Token* item);
 void pop(Stack* stack);

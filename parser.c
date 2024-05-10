@@ -1,17 +1,42 @@
-// Jessica Seabolt CMP SCI 4280 Project Updated 04/13/2024
+// Jessica Seabolt CMP SCI 4280 Project Updated 05/10/2024
+
+#define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
+#include "parsenode.h"
 #include "parser.h"
 #include "stack.h"
 
 Stack* stack = NULL;
+FILE* targetFile = NULL;
+int varCountGlobal = 0;
+
+static int LabelCntr=0; /* counting unique labels generated */
+static int VarCntr=0; /* counting unique temporaries generated */
+static char labelNames[255][20]; /* for creation of unique label names */
+static Variable variableEntries[255]; // Variable names w/ values
+static JumpFunc jumpFuncEntries[255]; // Variable names w/ values
+static int numJumpFuncs = 0;
+static int unaryUsed = 0; // A really dumb way of handling this lol
+
+
+void newName(nameType type) { 
+    if (type==VAR) { // creating new temporary
+        sprintf(variableEntries[VarCntr].name, "T%d", (VarCntr - varCountGlobal));
+        VarCntr++;
+    }
+    else { // creating new Label
+        sprintf(labelNames[LabelCntr],"L%d",LabelCntr); /* new lables as L0, L1, etc */
+        LabelCntr++;
+    }
+}   
 
 ParseNode* createNode(const char* label) {
     ParseNode* node = (ParseNode*)malloc(sizeof(ParseNode));
     strcpy(node->label, label);
-    node->value[0] = '\0';
     node->numChildren = 0;
     return node;
 }
@@ -21,9 +46,18 @@ void addChild(ParseNode* parent, ParseNode* child) {
     parent->numChildren++;
 }
 
-ParseNode* parser(FILE* inputFile) {
+void initVariableEntries() {
+    for (int i = 0; i < 255; i++) {
+        variableEntries[i].value = -7;
+    }
+}
+
+ParseNode* parser(FILE* inputFile, FILE* outputFile) {
+
+    targetFile = outputFile;
 
     initStack(&stack);
+    initVariableEntries();
 
     Token token = getToken(inputFile);
     
@@ -39,12 +73,11 @@ ParseNode* parser(FILE* inputFile) {
         freeParseTree(root);
         return NULL;
     }
+
 }
 
 ParseNode* program(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<program>");
-
-    int varCountGlobal = 0;
 
     ParseNode* varsNode = vars(token, inputFile, &varCountGlobal);
     if (varsNode != NULL) {
@@ -66,7 +99,6 @@ ParseNode* program(Token* token, FILE* inputFile) {
             if (funcNode != NULL) {
                 addChild(node, funcNode);
                 *token = getToken(inputFile);
-                varCountGlobal++;
             } else {
                 freeParseTree(node);
                 return NULL;
@@ -86,9 +118,12 @@ ParseNode* program(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    fprintf(targetFile, "STOP\n");
     for (int i = 0; i < varCountGlobal; i++) {
-        // printf("STACK: Stack top: %d, Stack item: %s\n", stack->top, stack->items[stack->top].tokenInstance);
         pop(stack);
+    }
+    for (int i = 0; i < (VarCntr); i++) {
+        fprintf(targetFile, "%s %d\n", variableEntries[i].name, variableEntries[i].value);
     }
 
     return node;
@@ -114,11 +149,21 @@ ParseNode* func(Token* token, FILE* inputFile) {
     if (lookup != -1) {
         printf("STACK ERROR: Identifier '%s' already found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
         freeParseTree(node);
+        fclose(targetFile);
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
     }
 
     addChild(node, createNode(token->tokenInstance));
     push(stack, token);
+
+    newName(LABEL);
+    char* skipLabel = labelNames[LabelCntr - 1];
+    fprintf(targetFile, "BR %s\n", skipLabel);// Used to pass the func until it's called
+
+    fprintf(targetFile, "%s: NOOP\n", token->tokenInstance);
+    strcpy(jumpFuncEntries[numJumpFuncs].funcName, token->tokenInstance);
 
     *token = getToken(inputFile);
     ParseNode* blockNode = block(token, inputFile);
@@ -128,6 +173,13 @@ ParseNode* func(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
+    newName(LABEL);
+    strcpy(jumpFuncEntries[numJumpFuncs].jumpName, labelNames[LabelCntr -1]);
+    fprintf(targetFile, "BR %s\n", jumpFuncEntries[numJumpFuncs].jumpName);
+    numJumpFuncs++;
+
+    fprintf(targetFile, "%s: NOOP\n", skipLabel);
 
     return node;
 }
@@ -150,15 +202,10 @@ ParseNode* block(Token* token, FILE* inputFile) {
         addChild(node, varsNode);
     }
 
-    // printf("DEBUG BLOCK: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
-
     ParseNode* statsNode = stats(token, inputFile);
-
-    // printf("DEBUG BLOCK: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
 
     if (statsNode != NULL) {
         addChild(node, statsNode);
-        // *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
@@ -198,12 +245,19 @@ ParseNode* vars(Token* token, FILE* inputFile, int* varCount) {
         if (lookup != -1) {
             printf("STACK ERROR: Identifier '%s' already found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
             freeParseTree(node);
+            fclose(targetFile);
+            remove("file.asm");
+            remove("kb.asm");
             exit(1);
         }
 
         addChild(node, createNode(token->tokenInstance));
 
+        sprintf(variableEntries[VarCntr].name, "%s", token->tokenInstance);
+        VarCntr++;
+
         push(stack, token);
+
         (*varCount)++;
 
         *token = getToken(inputFile);
@@ -220,10 +274,9 @@ ParseNode* vars(Token* token, FILE* inputFile, int* varCount) {
             }
 
             addChild(node, createNode(token->tokenInstance));
-
-            // printf("DEBUG VARS: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
+            variableEntries[VarCntr - 1].value = atoi(token->tokenInstance);
+            
             *token = getToken(inputFile);
-            // printf("DEBUG VARS: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
         }
 
         if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
@@ -248,6 +301,7 @@ ParseNode* vars(Token* token, FILE* inputFile, int* varCount) {
 }
 
 ParseNode* expr(Token* token, FILE* inputFile) {
+
     ParseNode* node = createNode("<expr>");
 
     ParseNode* nNode = N(token, inputFile);
@@ -258,40 +312,43 @@ ParseNode* expr(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    ParseNode* operatorNode = createNode(token->tokenInstance);
+    addChild(node, operatorNode);
+    *token = getToken(inputFile);
+
     ParseNode* exprPrimeNode = exprPrime(token, inputFile);
     if (exprPrimeNode != NULL) {
         addChild(node, exprPrimeNode);
     }
 
     return node;
+
 }
 
 ParseNode* exprPrime(Token* token, FILE* inputFile) {
-    ParseNode* node = createNode("<expr'>");
 
-    if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "-") == 0) {
-        addChild(node, createNode("-"));
-        *token = getToken(inputFile);
+    ParseNode* nNode = N(token, inputFile);
+    if (nNode != NULL) {
 
-        ParseNode* exprNode = expr(token, inputFile);
-        if (exprNode != NULL) {
-            addChild(node, exprNode);
-        } else {
-            freeParseTree(node);
-            return NULL;
+        ParseNode* node = createNode("<expr'>");
+
+        addChild(node, nNode);
+        ParseNode* moreExprPrime = exprPrime(token, inputFile);
+        if (moreExprPrime != NULL) {
+            addChild(node, moreExprPrime);
         }
+        return node;
+    } else {
+        return NULL;
     }
-
-    return node;
 }
 
 ParseNode* N(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<N>");
 
-    ParseNode* aNode = A(token, inputFile);
-    if (aNode != NULL) {
-        addChild(node, aNode);
-        // *token = getToken(inputFile);
+    ParseNode* mNode = M(token, inputFile);
+    if (mNode != NULL) {
+        addChild(node, mNode);
     } else {
         freeParseTree(node);
         return NULL;
@@ -305,98 +362,41 @@ ParseNode* N(Token* token, FILE* inputFile) {
     return node;
 }
 
+
 ParseNode* NPrime(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<N'>");
 
-    if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "/") == 0) {
-        addChild(node, createNode("/"));
+    if (token->tokenID == OPERATOR_TK && (strcmp(token->tokenInstance, "+") == 0 || strcmp(token->tokenInstance, "-") == 0)) {
+        addChild(node, createNode(token->tokenInstance));
         *token = getToken(inputFile);
 
         ParseNode* aNode = A(token, inputFile);
         if (aNode != NULL) {
             addChild(node, aNode);
-            *token = getToken(inputFile);
-        } else {
-            freeParseTree(node);
-            return NULL;
-        }
-
-        ParseNode* nPrimeNode = NPrime(token, inputFile);
-        if (nPrimeNode != NULL) {
-            addChild(node, nPrimeNode);
-        }
-    } else if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "+") == 0) {
-        addChild(node, createNode("+"));
-        *token = getToken(inputFile);
-
-        ParseNode* aNode = A(token, inputFile);
-        if (aNode != NULL) {
-            addChild(node, aNode);
-            *token = getToken(inputFile);
-        } else {
-            freeParseTree(node);
-            return NULL;
-        }
-
-        ParseNode* nPrimeNode = NPrime(token, inputFile);
-        if (nPrimeNode != NULL) {
-            addChild(node, nPrimeNode);
-        }
-    }
-
-    return node;
-}
-
-ParseNode* A(Token* token, FILE* inputFile) {
-    ParseNode* node = createNode("<A>");
-
-    ParseNode* mNode = M(token, inputFile);
-    if (mNode != NULL) {
-        addChild(node, mNode);
-        // *token = getToken(inputFile);
-    } else {
-        freeParseTree(node);
-        return NULL;
-    }
-
-    ParseNode* aPrimeNode = APrime(token, inputFile);
-    if (aPrimeNode != NULL) {
-        addChild(node, aPrimeNode);
-    }
-
-    return node;
-}
-
-ParseNode* APrime(Token* token, FILE* inputFile) {
-    ParseNode* node = createNode("<A'>");
-
-    if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "*") == 0) {
-        addChild(node, createNode("*"));
-        *token = getToken(inputFile);
-
-        ParseNode* aNode = A(token, inputFile);
-        if (aNode != NULL) {
-            addChild(node, aNode);
+            ParseNode* nPrimeNode = NPrime(token, inputFile);
+            if (nPrimeNode != NULL) {
+                addChild(node, nPrimeNode);
+            }
+            return node;
         } else {
             freeParseTree(node);
             return NULL;
         }
     }
 
-    return node;
+    return NULL; // No further operators, end of recursion
 }
 
 ParseNode* M(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<M>");
 
-    if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "^") == 0) {
+    if (strcmp(token->tokenInstance, "^") == 0) {
         addChild(node, createNode("^"));
-        *token = getToken(inputFile);
-
         ParseNode* mNode = M(token, inputFile);
         if (mNode != NULL) {
             addChild(node, mNode);
         } else {
+            printf("PARSER ERROR: M cannot be empty!\n");
             freeParseTree(node);
             return NULL;
         }
@@ -405,6 +405,7 @@ ParseNode* M(Token* token, FILE* inputFile) {
         if (rNode != NULL) {
             addChild(node, rNode);
         } else {
+            printf("PARSER ERROR: R cannot be empty!\n");
             freeParseTree(node);
             return NULL;
         }
@@ -413,33 +414,23 @@ ParseNode* M(Token* token, FILE* inputFile) {
     return node;
 }
 
+
 ParseNode* R(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<R>");
 
     if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, "(") == 0) {
         *token = getToken(inputFile);
+    }
 
-        ParseNode* exprNode = expr(token, inputFile);
-        if (exprNode != NULL) {
-            addChild(node, exprNode);
-            *token = getToken(inputFile);
-        } else {
-            freeParseTree(node);
-            return NULL;
-        }
-
-        if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ")") != 0) {
-            printf("PARSER ERROR: Expected ')' at line %d, char %d\n", token->lineNumber, token->charNumber);
-            freeParseTree(node);
-            return NULL;
-        }
-        
-    } else if (token->tokenID == ID_TK) {
+    if (token->tokenID == ID_TK) {
 
         int lookup = find(stack, token->tokenInstance);
         if (lookup == -1) {
             printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
             freeParseTree(node);
+            fclose(targetFile);
+            remove("file.asm");
+            remove("kb.asm");
             exit(1);
         }
 
@@ -447,8 +438,17 @@ ParseNode* R(Token* token, FILE* inputFile) {
     } else if (token->tokenID == INT_TK) {
         addChild(node, createNode(token->tokenInstance));
     } else {
-        freeParseTree(node);
-        return NULL;
+        ParseNode* exprNode = expr(token, inputFile);
+        if (exprNode != NULL) {
+            addChild(node, exprNode);
+        } else {
+            freeParseTree(node);
+            return NULL;
+        }
+    }
+
+    if (token->tokenID == OPERATOR_TK && strcmp(token->tokenInstance, ")") == 0) {
+        *token = getToken(inputFile);
     }
 
     return node;
@@ -460,7 +460,6 @@ ParseNode* stats(Token* token, FILE* inputFile) {
     ParseNode* statNode = stat(token, inputFile);
     if (statNode != NULL) {
         addChild(node, statNode);
-        *token = getToken(inputFile);
 
         ParseNode* mStatNode = mStat(token, inputFile);
         if (mStatNode != NULL) {
@@ -478,11 +477,9 @@ ParseNode* stats(Token* token, FILE* inputFile) {
 ParseNode* mStat(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<mStat>");
 
-    
     ParseNode* statNode = stat(token, inputFile);
     if (statNode != NULL) {
         addChild(node, statNode);
-        *token = getToken(inputFile);
 
         ParseNode* mStatNode = mStat(token, inputFile);
         if (mStatNode != NULL) {
@@ -495,7 +492,6 @@ ParseNode* mStat(Token* token, FILE* inputFile) {
 
 ParseNode* stat(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<stat>");
-    // printf("DEBUG STAT: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
 
     if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "cin") == 0) {
         ParseNode* inNode = in(token, inputFile);
@@ -505,10 +501,12 @@ ParseNode* stat(Token* token, FILE* inputFile) {
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'cin' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -518,14 +516,13 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         ParseNode* outNode = out(token, inputFile);
         if (outNode != NULL) {
             addChild(node, outNode);
-
-            *token = getToken(inputFile);
-
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
                 printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -543,14 +540,15 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         ParseNode* ifNode = ifFunc(token, inputFile);
         if (ifNode != NULL) {
             addChild(node, ifNode);
-
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'if' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -564,10 +562,12 @@ ParseNode* stat(Token* token, FILE* inputFile) {
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'while' loop at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -581,12 +581,12 @@ ParseNode* stat(Token* token, FILE* inputFile) {
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'repeat' loop at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
 
-
+            *token = getToken(inputFile);
         } else {
             freeParseTree(node);
             return NULL;
@@ -596,13 +596,13 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         if (assignNode != NULL) {
             addChild(node, assignNode);
 
-            *token = getToken(inputFile);
-
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'set' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -616,10 +616,12 @@ ParseNode* stat(Token* token, FILE* inputFile) {
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'label' at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -629,14 +631,15 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         ParseNode* gotoNode = gotoFunc(token, inputFile);
         if (gotoNode != NULL) {
             addChild(node, gotoNode);
-
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after 'jump' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
+
+            *token = getToken(inputFile);
 
         } else {
             freeParseTree(node);
@@ -650,15 +653,40 @@ ParseNode* stat(Token* token, FILE* inputFile) {
             *token = getToken(inputFile);
 
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after 'cout' statement at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after pickbody at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
+            }
+
+            *token = getToken(inputFile);
+
+        } else {
+            freeParseTree(node);
+            return NULL;
+        }
+    } else if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "create") == 0) {
+        int varsCount = 0;
+        ParseNode* varsNode = vars(token, inputFile, &varsCount);
+        if (varsNode != NULL) {
+            addChild(node, varsNode);
+
+            for (int i = 0; i < varsCount; i++) {
+                pop(stack);
             }
 
         } else {
             freeParseTree(node);
             return NULL;
         }
+    } else if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "func") == 0) {
+            ParseNode* funcNode = func(token, inputFile);
+            if (funcNode != NULL) {
+                addChild(node, funcNode);
+                *token = getToken(inputFile);
+            } else {
+                freeParseTree(node);
+                return NULL;
+            }
     } else {
         freeParseTree(node);
         return NULL;
@@ -689,8 +717,13 @@ ParseNode* in(Token* token, FILE* inputFile) {
     if (lookup == -1) {
         printf("STACK ERROR: Identifier '%s' not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
         freeParseTree(node);
+        fclose(targetFile);
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
     }
+    
+    fprintf(targetFile, "READ %s\n", token->tokenInstance);
 
     addChild(node, createNode(token->tokenInstance));
 
@@ -698,6 +731,7 @@ ParseNode* in(Token* token, FILE* inputFile) {
 }
 
 ParseNode* out(Token* token, FILE* inputFile) {
+    
     if (token->tokenID != KEYWORD_TK || strcmp(token->tokenInstance, "cout") != 0) {
         printf("PARSER ERROR: Expected 'cout' keyword at line %d, char %d\n", token->lineNumber, token->charNumber);
         return NULL;
@@ -710,13 +744,19 @@ ParseNode* out(Token* token, FILE* inputFile) {
     *token = getToken(inputFile);
 
     ParseNode* exprNode = expr(token, inputFile);
-
     if (exprNode != NULL) {
         addChild(node, exprNode);
     } else {
         freeParseTree(node);
         return NULL;
     }
+
+    // Traversal and code gen
+    newName(VAR);
+    int hasLoaded = 0;
+    exprTraversal(exprNode, &hasLoaded);
+
+    fprintf(targetFile, "WRITE %s\n", variableEntries[VarCntr - 1].name);
 
     return node;
 }
@@ -741,7 +781,6 @@ ParseNode* ifFunc(Token* token, FILE* inputFile) {
     ParseNode* expr1Node = expr(token, inputFile);
     if (expr1Node != NULL) {
         addChild(node, expr1Node);
-        *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
@@ -759,10 +798,70 @@ ParseNode* ifFunc(Token* token, FILE* inputFile) {
     ParseNode* expr2Node = expr(token, inputFile);
     if (expr2Node != NULL) {
         addChild(node, expr2Node);
-        *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
+    }
+
+    // Traversal and code gen
+    newName(VAR);
+    int hasLoaded = 0;
+    exprTraversal(expr1Node, &hasLoaded);
+    newName(VAR);
+    hasLoaded = 0;
+    exprTraversal(expr2Node, &hasLoaded);
+
+    if (strcmp(roNode->children[0]->label, "<") == 0) {
+
+        newName(LABEL);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr -1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", labelNames[LabelCntr - 1]);
+
+    } else if (strcmp(roNode->children[0]->label, ">") == 0) {
+
+        newName(LABEL);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRNEG %s\n", labelNames[LabelCntr - 1]);
+
+    } else if (strcmp(roNode->children[0]->label, "==") == 0) {
+
+        newName(LABEL);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRNEG %s\n", labelNames[LabelCntr - 1]);
+        fprintf(targetFile, "BRPOS %s\n", labelNames[LabelCntr - 1]);
+
+    } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
+        newName(LABEL);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
+    } else {
+        newName(LABEL);
+        newName(LABEL);
+        newName(LABEL);
+        newName(LABEL);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 4]);
+        fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 3]);
+        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 4], variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 2]);
+        fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 1]);
+        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 3], variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
+        fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 2]);
+        fprintf(targetFile, "%s: NOOP\n", labelNames[LabelCntr - 2]);
     }
 
     if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, "]") != 0) {
@@ -788,6 +887,8 @@ ParseNode* ifFunc(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    fprintf(targetFile, "%s: NOOP\n", labelNames[LabelCntr - 1]);
+
     return node;
 }
 
@@ -811,9 +912,6 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
     ParseNode* expr1Node = expr(token, inputFile);
     if (expr1Node != NULL) {
         addChild(node, expr1Node);
-        *token = getToken(inputFile);
-
-        printf("DEBUG LOOP1: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
 
     } else {
         freeParseTree(node);
@@ -824,9 +922,6 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
     if (roNode != NULL) {
         addChild(node, roNode);
         *token = getToken(inputFile);
-
-        printf("DEBUG LOOP1: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
-
     } else {
         freeParseTree(node);
         return NULL;
@@ -835,13 +930,10 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
     ParseNode* expr2Node = expr(token, inputFile);
     if (expr2Node != NULL) {
         addChild(node, expr2Node);
-        *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
     }
-
-    printf("DEBUG LOOP1: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
 
     if (strcmp(token->tokenInstance, "]") != 0) {
         printf("PARSER ERROR: Expected ']' after 'while' condition at line %d, char %d\n", token->lineNumber, token->charNumber);
@@ -849,7 +941,73 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    // Traversal and code gen
+    newName(LABEL);
+    newName(LABEL);
+    char* originalLabel = labelNames[LabelCntr - 2];
+    char* endLabel = labelNames[LabelCntr - 1];
+    fprintf(targetFile, "%s: NOOP\n", originalLabel);
+    newName(VAR);
+    int hasLoaded = 0;
+    exprTraversal(expr1Node, &hasLoaded);
+    newName(VAR);
+    hasLoaded = 0;
+    exprTraversal(expr2Node, &hasLoaded);
+
+    if (strcmp(roNode->children[0]->label, "<") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", endLabel);
+
+    } else if (strcmp(roNode->children[0]->label, ">") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRNEG %s\n", endLabel);
+
+    } else if (strcmp(roNode->children[0]->label, "==") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRNEG %s\n", endLabel);
+        fprintf(targetFile, "BRPOS %s\n", endLabel);
+
+    } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", endLabel);
+    } else {
+        newName(LABEL);
+        char* evenLabel = labelNames[LabelCntr - 1];
+        newName(LABEL);
+        char* oddLabel = labelNames[LabelCntr - 1];
+        newName(LABEL);
+        char* endOfCheckLabel = labelNames[LabelCntr - 1];
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "BRZERO %s\n", evenLabel);
+        fprintf(targetFile, "BR %s\n", oddLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", endLabel);
+        fprintf(targetFile, "BRNEG %s\n", endLabel);
+        fprintf(targetFile, "BR %s\n", endOfCheckLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", endLabel);
+        fprintf(targetFile, "BR %s\n", endOfCheckLabel);
+        fprintf(targetFile, "%s: NOOP\n", endOfCheckLabel);
+    }
+
     *token = getToken(inputFile);
+
     ParseNode* statNode = stat(token, inputFile);
     if (statNode != NULL) {
         addChild(node, statNode);
@@ -857,6 +1015,9 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
+    fprintf(targetFile, "BR %s\n", originalLabel);
+    fprintf(targetFile, "%s: NOOP\n", endLabel);
 
     return node;
 }
@@ -870,6 +1031,10 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<loop2>");
     addChild(node, createNode("repeat"));
 
+    newName(LABEL);
+    char* originalLabel = labelNames[LabelCntr - 1];
+    fprintf(targetFile, "%s: NOOP\n", originalLabel);
+
     *token = getToken(inputFile);
     ParseNode* statNode = stat(token, inputFile);
     if (statNode != NULL) {
@@ -879,6 +1044,7 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
         freeParseTree(node);
         return NULL;
     }
+
 
     if (token->tokenID != KEYWORD_TK || strcmp(token->tokenInstance, "until") != 0) {
         printf("PARSER ERROR: Expected 'until' keyword after 'repeat' at line %d, char %d\n", token->lineNumber, token->charNumber);
@@ -898,7 +1064,6 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
     ParseNode* expr1Node = expr(token, inputFile);
     if (expr1Node != NULL) {
         addChild(node, expr1Node);
-        *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
@@ -916,7 +1081,6 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
     ParseNode* expr2Node = expr(token, inputFile);
     if (expr2Node != NULL) {
         addChild(node, expr2Node);
-        *token = getToken(inputFile);
     } else {
         freeParseTree(node);
         return NULL;
@@ -928,18 +1092,82 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
         return NULL;
     }
 
+    // Traversal and code gen
+    newName(VAR);
+    int hasLoaded = 0;
+    exprTraversal(expr1Node, &hasLoaded);
+    newName(VAR);
+    hasLoaded = 0;
+    exprTraversal(expr2Node, &hasLoaded);
+
+    if (strcmp(roNode->children[0]->label, "<") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", originalLabel);
+
+    } else if (strcmp(roNode->children[0]->label, ">") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRNEG %s\n", originalLabel);
+
+    } else if (strcmp(roNode->children[0]->label, "==") == 0) {
+
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", originalLabel);
+        fprintf(targetFile, "BRNEG %s\n", originalLabel);
+
+    } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", originalLabel);
+    } else {
+        newName(LABEL);
+        char* evenLabel = labelNames[LabelCntr - 1];
+        newName(LABEL);
+        char* oddLabel = labelNames[LabelCntr - 1];
+        newName(LABEL);
+        char* endOfCheckLabel = labelNames[LabelCntr - 1];
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "BRZERO %s\n", evenLabel);
+        fprintf(targetFile, "BR %s\n", oddLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRPOS %s\n", originalLabel);
+        fprintf(targetFile, "BRNEG %s\n", originalLabel);
+        fprintf(targetFile, "BR %s\n", endOfCheckLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "BRZERO %s\n", originalLabel);
+        fprintf(targetFile, "BR %s\n", endOfCheckLabel);
+        fprintf(targetFile, "%s: NOOP\n", endOfCheckLabel);
+    }
+
     return node;
 }
 
 ParseNode* assign(Token* token, FILE* inputFile) {
     ParseNode* node = createNode("<assign>");
 
+    int set = 0;
+
     if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "set") == 0) {
         addChild(node, createNode("set"));
         *token = getToken(inputFile);
+        set = 1;
     }
 
-    printf("DEBUG ASSIGN: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
+
+    char* idName = token->tokenInstance;
 
     if (token->tokenID == ID_TK) {
 
@@ -947,13 +1175,15 @@ ParseNode* assign(Token* token, FILE* inputFile) {
         if (lookup == -1) {
             printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
             freeParseTree(node);
+            fclose(targetFile);
+            remove("file.asm");
+            remove("kb.asm");
             exit(1);
         }
 
         addChild(node, createNode(token->tokenInstance));
-        *token = getToken(inputFile);
 
-        printf("DEBUG ASSIGN: Token: %s, Token ID: %d, Line: %d, Char: %d\n", token->tokenInstance, token->tokenID, token->lineNumber, token->charNumber);
+        *token = getToken(inputFile);
 
         if (strcmp(token->tokenInstance, "=") != 0) {
             printf("PARSER ERROR: Expected '=' after identifier in assignment at line %d, char %d\n", token->lineNumber, token->charNumber);
@@ -968,13 +1198,28 @@ ParseNode* assign(Token* token, FILE* inputFile) {
         return NULL;
     }
 
-    ParseNode* exprNode = expr(token, inputFile);
-    if (exprNode != NULL) {
-        addChild(node, exprNode);
+
+    if (set == 1) {
+        ParseNode* exprNode = expr(token, inputFile);
+        if (exprNode != NULL) {
+            addChild(node, exprNode);
+        } else {
+            freeParseTree(node);
+            return NULL;
+        }
+
+        // Traversal and code gen
+        newName(VAR);
+        int hasLoaded = 0;
+        exprTraversal(exprNode, &hasLoaded);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "STORE %s\n", idName);
     } else {
-        freeParseTree(node);
-        return NULL;
+        fprintf(targetFile, "LOAD %s\n", token->tokenInstance);
+        fprintf(targetFile, "STORE %s\n", idName);
     }
+
+    *token = getToken(inputFile);
 
     return node;
 }
@@ -987,8 +1232,9 @@ ParseNode* RO(Token* token) {
         strcmp(token->tokenInstance, ">") == 0 ||
         strcmp(token->tokenInstance, "==") == 0 ||
         strcmp(token->tokenInstance, "=!=") == 0 ||
-        strcmp(token->tokenInstance, "<=") == 0 ||
-        strcmp(token->tokenInstance, ">=") == 0)) {
+        strcmp(token->tokenInstance, "...") == 0 ||
+        strcmp(token->tokenInstance, ">=") == 0 || 
+        strcmp(token->tokenInstance, "<=") == 0)) {
         addChild(node, createNode(token->tokenInstance));
     } else {
         printf("PARSER ERROR: Expected relational operator at line %d, char %d\n", token->lineNumber, token->charNumber);
@@ -1019,10 +1265,15 @@ ParseNode* label(Token* token, FILE* inputFile) {
     if (lookup == -1) {
         printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
         freeParseTree(node);
+        fclose(targetFile);
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
     }
 
     addChild(node, createNode(token->tokenInstance));
+
+    fprintf(targetFile, "%s: NOOP\n", token->tokenInstance);
 
     return node;
 }
@@ -1047,7 +1298,18 @@ ParseNode* gotoFunc(Token* token, FILE* inputFile) {
     if (lookup == -1) {
         printf("STACK ERROR: Identifier '%s'not found in stack at line %d, char %d\n", token->tokenInstance, token->lineNumber, token->charNumber);
         freeParseTree(node);
+        fclose(targetFile);
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
+    }
+
+    fprintf(targetFile, "BR %s\n", token->tokenInstance);
+
+    for (int i = 0; i < numJumpFuncs; i++) {
+        if (strcmp(jumpFuncEntries[i].funcName, token->tokenInstance) == 0) {
+            fprintf(targetFile, "%s: NOOP\n", jumpFuncEntries[i].jumpName);
+        }
     }
 
     addChild(node, createNode(token->tokenInstance));
@@ -1115,4 +1377,58 @@ ParseNode* pickBody(FILE* inputFile) {
     addChild(pickBodyNode, secondStatNode);
 
     return pickBodyNode;
+}
+
+void exprTraversal(ParseNode* node, int* hasLoaded) {
+
+    if (node->numChildren > 0) {
+        for (int i = 0; i < node->numChildren; i++) {
+            exprTraversal(node->children[i], hasLoaded);
+        }
+    }
+
+    if (strcmp(node->label, "+") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "ADD ");
+    } else if (strcmp(node->label, "-") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "SUB ");
+    } else if (strcmp(node->label, "*") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "MULT ");
+    } else if (strcmp(node->label, "/") == 0) {
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "DIV ");
+    } else if (strcmp(node->label, "^") == 0) {
+            unaryUsed = 1;
+    } else if (strcmp(node->label, "<expr>") != 0
+                && strcmp(node->label, "<N>") != 0
+                && strcmp(node->label, "<expr'>") != 0
+                && strcmp(node->label, "<A>") != 0
+                && strcmp(node->label, "<N'>") != 0
+                && strcmp(node->label, "<M>") != 0
+                && strcmp(node->label, "<A'>") != 0
+                && strcmp(node->label, "<R>") != 0
+                && strcmp(node->label, "<expr>") != 0) {
+
+                    if (*hasLoaded == 0) {
+                        fprintf(targetFile, "LOAD %s\n", node->label);
+                        fprintf(targetFile, "STORE %s\n", variableEntries[VarCntr - 1].name);
+                        *hasLoaded = 1;
+                    }
+                    else {
+                        fprintf(targetFile, "%s\n", node->label);
+                        if (unaryUsed == 1) {
+                            unaryUsed = 0;
+                            if (strcmp(node->label, "0") == 0) {
+                                fprintf(targetFile, "ADD 1\n");
+                            }
+                            if (strcmp(node->label, "1") == 0) {
+                                fprintf(targetFile, "SUB 1\n");
+                            }
+                            fprintf(targetFile, "MULT -1\n");
+                        }
+                        fprintf(targetFile, "STORE %s\n", variableEntries[VarCntr - 1].name);
+                    }
+                }
 }

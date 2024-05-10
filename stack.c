@@ -13,6 +13,8 @@ void initStack(Stack** stack) {
 void push(Stack* stack, Token* item) {
     if (stack->top == MAX_STACK_SIZE - 1) {
         printf("STACK ERROR: Stack overflow\n");
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
     }
     
@@ -23,6 +25,8 @@ void push(Stack* stack, Token* item) {
 void pop(Stack* stack) {
     if (stack->top == -1) {
         printf("STACK ERROR: Stack underflow\n");
+        remove("file.asm");
+        remove("kb.asm");
         exit(1);
     }
     (stack->top)--;
