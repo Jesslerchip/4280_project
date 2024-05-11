@@ -19,8 +19,7 @@ static int VarCntr=0; /* counting unique temporaries generated */
 static char labelNames[255][20]; /* for creation of unique label names */
 static Variable variableEntries[255]; // Variable names w/ values
 static JumpFunc jumpFuncEntries[255]; // Variable names w/ values
-static int numJumpFuncs = 0;
-static int unaryUsed = 0; // A really dumb way of handling this lol
+static int numJumpFuncs = 0; // A really dumb way of handling this lol
 
 
 void newName(nameType type) { 
@@ -304,17 +303,13 @@ ParseNode* expr(Token* token, FILE* inputFile) {
 
     ParseNode* node = createNode("<expr>");
 
-    ParseNode* nNode = N(token, inputFile);
-    if (nNode != NULL) {
-        addChild(node, nNode);
+    ParseNode* mNode = M(token, inputFile);
+    if (mNode != NULL) {
+        addChild(node, mNode);
     } else {
         freeParseTree(node);
         return NULL;
     }
-
-    ParseNode* operatorNode = createNode(token->tokenInstance);
-    addChild(node, operatorNode);
-    *token = getToken(inputFile);
 
     ParseNode* exprPrimeNode = exprPrime(token, inputFile);
     if (exprPrimeNode != NULL) {
@@ -327,64 +322,26 @@ ParseNode* expr(Token* token, FILE* inputFile) {
 
 ParseNode* exprPrime(Token* token, FILE* inputFile) {
 
-    ParseNode* nNode = N(token, inputFile);
-    if (nNode != NULL) {
-
-        ParseNode* node = createNode("<expr'>");
-
-        addChild(node, nNode);
-        ParseNode* moreExprPrime = exprPrime(token, inputFile);
-        if (moreExprPrime != NULL) {
-            addChild(node, moreExprPrime);
-        }
-        return node;
-    } else {
-        return NULL;
-    }
-}
-
-ParseNode* N(Token* token, FILE* inputFile) {
-    ParseNode* node = createNode("<N>");
-
-    ParseNode* mNode = M(token, inputFile);
-    if (mNode != NULL) {
-        addChild(node, mNode);
-    } else {
-        freeParseTree(node);
-        return NULL;
-    }
-
-    ParseNode* nPrimeNode = NPrime(token, inputFile);
-    if (nPrimeNode != NULL) {
-        addChild(node, nPrimeNode);
-    }
-
-    return node;
-}
+    ParseNode* node = createNode("<expr'>");
 
 
-ParseNode* NPrime(Token* token, FILE* inputFile) {
-    ParseNode* node = createNode("<N'>");
-
-    if (token->tokenID == OPERATOR_TK && (strcmp(token->tokenInstance, "+") == 0 || strcmp(token->tokenInstance, "-") == 0)) {
-        addChild(node, createNode(token->tokenInstance));
-        *token = getToken(inputFile);
-
-        ParseNode* aNode = A(token, inputFile);
-        if (aNode != NULL) {
-            addChild(node, aNode);
-            ParseNode* nPrimeNode = NPrime(token, inputFile);
-            if (nPrimeNode != NULL) {
-                addChild(node, nPrimeNode);
-            }
-            return node;
-        } else {
+    if (strcmp(token->tokenInstance, "+") != 0 &&
+        strcmp(token->tokenInstance, "-") != 0 &&
+        strcmp(token->tokenInstance, "*") != 0 &&
+        strcmp(token->tokenInstance, "/") != 0) {
             freeParseTree(node);
             return NULL;
-        }
     }
 
-    return NULL; // No further operators, end of recursion
+    addChild(node, createNode(token->tokenInstance));
+    *token = getToken(inputFile);
+
+    ParseNode* exprNode = expr(token, inputFile);
+    if (exprNode != NULL) {
+        addChild(node, exprNode);
+    }
+        
+    return node;
 }
 
 ParseNode* M(Token* token, FILE* inputFile) {
@@ -392,6 +349,7 @@ ParseNode* M(Token* token, FILE* inputFile) {
 
     if (strcmp(token->tokenInstance, "^") == 0) {
         addChild(node, createNode("^"));
+        *token = getToken(inputFile);
         ParseNode* mNode = M(token, inputFile);
         if (mNode != NULL) {
             addChild(node, mNode);
@@ -435,8 +393,10 @@ ParseNode* R(Token* token, FILE* inputFile) {
         }
 
         addChild(node, createNode(token->tokenInstance));
+        *token = getToken(inputFile);
     } else if (token->tokenID == INT_TK) {
         addChild(node, createNode(token->tokenInstance));
+        *token = getToken(inputFile);
     } else {
         ParseNode* exprNode = expr(token, inputFile);
         if (exprNode != NULL) {
@@ -650,10 +610,8 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         if (pickNode != NULL) {
             addChild(node, pickNode);
 
-            *token = getToken(inputFile);
-
             if (token->tokenID != OPERATOR_TK || strcmp(token->tokenInstance, ";") != 0) {
-                printf("PARSER ERROR: Expected ';' after pickbody at line %d, char %d\n", token->lineNumber, token->charNumber);
+                printf("PARSER ERROR: Expected ';' after pick at line %d, char %d\n", token->lineNumber, token->charNumber);
                 freeParseTree(node);
                 return NULL;
             }
@@ -666,13 +624,10 @@ ParseNode* stat(Token* token, FILE* inputFile) {
         }
     } else if (token->tokenID == KEYWORD_TK && strcmp(token->tokenInstance, "create") == 0) {
         int varsCount = 0;
+
         ParseNode* varsNode = vars(token, inputFile, &varsCount);
         if (varsNode != NULL) {
             addChild(node, varsNode);
-
-            for (int i = 0; i < varsCount; i++) {
-                pop(stack);
-            }
 
         } else {
             freeParseTree(node);
@@ -754,7 +709,9 @@ ParseNode* out(Token* token, FILE* inputFile) {
     // Traversal and code gen
     newName(VAR);
     int hasLoaded = 0;
-    exprTraversal(exprNode, &hasLoaded);
+    int unaryUsed = 0;
+    char lastUsed = '0';
+    exprTraversal(exprNode, &hasLoaded, &unaryUsed, &lastUsed);
 
     fprintf(targetFile, "WRITE %s\n", variableEntries[VarCntr - 1].name);
 
@@ -806,59 +763,63 @@ ParseNode* ifFunc(Token* token, FILE* inputFile) {
     // Traversal and code gen
     newName(VAR);
     int hasLoaded = 0;
-    exprTraversal(expr1Node, &hasLoaded);
+    int unaryUsed = 0;
+    char lastUsed = 0;
+    exprTraversal(expr1Node, &hasLoaded, &unaryUsed, &lastUsed);
     newName(VAR);
     hasLoaded = 0;
-    exprTraversal(expr2Node, &hasLoaded);
+    exprTraversal(expr2Node, &hasLoaded, &unaryUsed, &lastUsed);
 
     if (strcmp(roNode->children[0]->label, "<") == 0) {
 
         newName(LABEL);
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr -1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRPOS %s\n", labelNames[LabelCntr - 1]);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
 
     } else if (strcmp(roNode->children[0]->label, ">") == 0) {
 
         newName(LABEL);
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRNEG %s\n", labelNames[LabelCntr - 1]);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
 
     } else if (strcmp(roNode->children[0]->label, "==") == 0) {
 
         newName(LABEL);
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRNEG %s\n", labelNames[LabelCntr - 1]);
         fprintf(targetFile, "BRPOS %s\n", labelNames[LabelCntr - 1]);
 
     } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
         newName(LABEL);
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
     } else {
         newName(LABEL);
         newName(LABEL);
         newName(LABEL);
         newName(LABEL);
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 4]);
+        fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 3]);
+        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 4], variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
         fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 4]);
-        fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 3]);
-        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 4], variableEntries[VarCntr].name);
-        fprintf(targetFile, "DIV 2\n");
-        fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
         fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 2]);
         fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 1]);
-        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 3], variableEntries[VarCntr].name);
+        fprintf(targetFile, "%s: LOAD %s\n", labelNames[LabelCntr - 3], variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
         fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 2]);
         fprintf(targetFile, "%s: NOOP\n", labelNames[LabelCntr - 2]);
@@ -949,33 +910,35 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
     fprintf(targetFile, "%s: NOOP\n", originalLabel);
     newName(VAR);
     int hasLoaded = 0;
-    exprTraversal(expr1Node, &hasLoaded);
+    int unaryUsed = 0;
+    char lastUsed = 'o';
+    exprTraversal(expr1Node, &hasLoaded, &unaryUsed, &lastUsed);
     newName(VAR);
     hasLoaded = 0;
-    exprTraversal(expr2Node, &hasLoaded);
+    exprTraversal(expr2Node, &hasLoaded, &unaryUsed, &lastUsed);
 
     if (strcmp(roNode->children[0]->label, "<") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRPOS %s\n", endLabel);
 
     } else if (strcmp(roNode->children[0]->label, ">") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRNEG %s\n", endLabel);
 
     } else if (strcmp(roNode->children[0]->label, "==") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRNEG %s\n", endLabel);
         fprintf(targetFile, "BRPOS %s\n", endLabel);
 
     } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", endLabel);
     } else {
         newName(LABEL);
@@ -984,23 +947,23 @@ ParseNode* loop1(Token* token, FILE* inputFile) {
         char* oddLabel = labelNames[LabelCntr - 1];
         newName(LABEL);
         char* endOfCheckLabel = labelNames[LabelCntr - 1];
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "BRZERO %s\n", evenLabel);
+        fprintf(targetFile, "BR %s\n", oddLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
         fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "BRZERO %s\n", evenLabel);
-        fprintf(targetFile, "BR %s\n", oddLabel);
-        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr].name);
-        fprintf(targetFile, "DIV 2\n");
-        fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
         fprintf(targetFile, "BRPOS %s\n", endLabel);
         fprintf(targetFile, "BRNEG %s\n", endLabel);
         fprintf(targetFile, "BR %s\n", endOfCheckLabel);
-        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", endLabel);
         fprintf(targetFile, "BR %s\n", endOfCheckLabel);
         fprintf(targetFile, "%s: NOOP\n", endOfCheckLabel);
@@ -1095,33 +1058,37 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
     // Traversal and code gen
     newName(VAR);
     int hasLoaded = 0;
-    exprTraversal(expr1Node, &hasLoaded);
+    int unaryUsed = 0;
+    char lastUsed = 'o';
+    exprTraversal(expr1Node, &hasLoaded, &unaryUsed, &lastUsed);
     newName(VAR);
     hasLoaded = 0;
-    exprTraversal(expr2Node, &hasLoaded);
+    exprTraversal(expr2Node, &hasLoaded, &unaryUsed, &lastUsed);
 
     if (strcmp(roNode->children[0]->label, "<") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRPOS %s\n", originalLabel);
+        fprintf(targetFile, "BRZERO %s\n", originalLabel);
 
     } else if (strcmp(roNode->children[0]->label, ">") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRNEG %s\n", originalLabel);
+        fprintf(targetFile, "BRZERO %s\n", originalLabel);
 
     } else if (strcmp(roNode->children[0]->label, "==") == 0) {
 
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRPOS %s\n", originalLabel);
         fprintf(targetFile, "BRNEG %s\n", originalLabel);
 
     } else if (strcmp(roNode->children[0]->label, "=!=") == 0) {
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", originalLabel);
     } else {
         newName(LABEL);
@@ -1130,23 +1097,23 @@ ParseNode* loop2(Token* token, FILE* inputFile) {
         char* oddLabel = labelNames[LabelCntr - 1];
         newName(LABEL);
         char* endOfCheckLabel = labelNames[LabelCntr - 1];
-        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+        fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "DIV 2\n");
+        fprintf(targetFile, "MULT 2\n");
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 2].name);
+        fprintf(targetFile, "BRZERO %s\n", evenLabel);
+        fprintf(targetFile, "BR %s\n", oddLabel);
+        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
         fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
-        fprintf(targetFile, "BRZERO %s\n", evenLabel);
-        fprintf(targetFile, "BR %s\n", oddLabel);
-        fprintf(targetFile, "%s: LOAD %s\n", evenLabel, variableEntries[VarCntr].name);
-        fprintf(targetFile, "DIV 2\n");
-        fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
         fprintf(targetFile, "BRPOS %s\n", originalLabel);
         fprintf(targetFile, "BRNEG %s\n", originalLabel);
         fprintf(targetFile, "BR %s\n", endOfCheckLabel);
-        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr].name);
+        fprintf(targetFile, "%s: LOAD %s\n", oddLabel, variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV 2\n");
         fprintf(targetFile, "MULT 2\n");
-        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr].name);
+        fprintf(targetFile, "SUB %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "BRZERO %s\n", originalLabel);
         fprintf(targetFile, "BR %s\n", endOfCheckLabel);
         fprintf(targetFile, "%s: NOOP\n", endOfCheckLabel);
@@ -1165,7 +1132,6 @@ ParseNode* assign(Token* token, FILE* inputFile) {
         *token = getToken(inputFile);
         set = 1;
     }
-
 
     char* idName = token->tokenInstance;
 
@@ -1211,15 +1177,16 @@ ParseNode* assign(Token* token, FILE* inputFile) {
         // Traversal and code gen
         newName(VAR);
         int hasLoaded = 0;
-        exprTraversal(exprNode, &hasLoaded);
+        int unaryUsed = 0;
+        char lastUsed = 'o';
+        exprTraversal(exprNode, &hasLoaded, &unaryUsed, &lastUsed);
         fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "STORE %s\n", idName);
     } else {
         fprintf(targetFile, "LOAD %s\n", token->tokenInstance);
         fprintf(targetFile, "STORE %s\n", idName);
+        *token = getToken(inputFile);
     }
-
-    *token = getToken(inputFile);
 
     return node;
 }
@@ -1336,7 +1303,19 @@ ParseNode* pick(Token* token, FILE* inputFile) {
     }
     addChild(node, exprNode);
 
-    ParseNode* pickBodyNode = pickBody(inputFile);
+    // Traversal and code gen
+    newName(VAR);
+    int hasLoaded = 0;
+    int unaryUsed = 0;
+    char lastUsed = 0;
+    exprTraversal(exprNode, &hasLoaded, &unaryUsed, &lastUsed);
+
+    newName(LABEL);
+    newName(LABEL);
+    fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
+    fprintf(targetFile, "BRZERO %s\n", labelNames[LabelCntr - 1]);
+
+    ParseNode* pickBodyNode = pickBody(token, inputFile);
     if (pickBodyNode == NULL) {
         printf("PARSER ERROR: Invalid or missing pick body after expression\n");
         freeParseTree(node);
@@ -1347,12 +1326,10 @@ ParseNode* pick(Token* token, FILE* inputFile) {
     return node;
 }
 
-ParseNode* pickBody(FILE* inputFile) {
+ParseNode* pickBody(Token* token, FILE* inputFile) {
     ParseNode* pickBodyNode = createNode("<pickbody>");
 
-    Token token = getToken(inputFile);
-
-    ParseNode* firstStatNode = stat(&token, inputFile);
+    ParseNode* firstStatNode = stat(token, inputFile);
     if (firstStatNode == NULL) {
         printf("PARSER ERROR: Expected valid statement in pickbody\n");
         freeParseTree(pickBodyNode);
@@ -1360,15 +1337,18 @@ ParseNode* pickBody(FILE* inputFile) {
     }
     addChild(pickBodyNode, firstStatNode);
 
-    token = getToken(inputFile);
-    if (strcmp(token.tokenInstance, ":") != 0) {
-        printf("PARSER ERROR: Expected ':' after first statement in pickbody at line %d, char %d\n", token.lineNumber, token.charNumber);
+    fprintf(targetFile, "BR %s\n", labelNames[LabelCntr - 2]);
+
+    if (strcmp(token->tokenInstance, ":") != 0) {
+        printf("PARSER ERROR: Expected ':' after first statement in pickbody at line %d, char %d\n", token->lineNumber, token->charNumber);
         freeParseTree(pickBodyNode);
         return NULL;
     }
 
-    token = getToken(inputFile);
-    ParseNode* secondStatNode = stat(&token, inputFile);
+    fprintf(targetFile, "%s: ", labelNames[LabelCntr - 1]);
+
+    *token = getToken(inputFile);
+    ParseNode* secondStatNode = stat(token, inputFile);
     if (secondStatNode == NULL) {
         printf("PARSER ERROR: Expected valid statement after ':' in pickbody\n");
         freeParseTree(pickBodyNode);
@@ -1376,31 +1356,37 @@ ParseNode* pickBody(FILE* inputFile) {
     }
     addChild(pickBodyNode, secondStatNode);
 
+    fprintf(targetFile, "%s: NOOP\n", labelNames[LabelCntr - 2]);
+
     return pickBodyNode;
 }
 
-void exprTraversal(ParseNode* node, int* hasLoaded) {
+void exprTraversal(ParseNode* node, int* hasLoaded, int* unaryUsed, char* lastUsed) {
 
     if (node->numChildren > 0) {
         for (int i = 0; i < node->numChildren; i++) {
-            exprTraversal(node->children[i], hasLoaded);
+            exprTraversal(node->children[i], hasLoaded, unaryUsed, lastUsed);
         }
     }
 
     if (strcmp(node->label, "+") == 0) {
         fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "ADD ");
+        *lastUsed = 'a';
     } else if (strcmp(node->label, "-") == 0) {
         fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "SUB ");
+        *lastUsed = 's';
     } else if (strcmp(node->label, "*") == 0) {
         fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "MULT ");
+        *lastUsed = 'm';
     } else if (strcmp(node->label, "/") == 0) {
         fprintf(targetFile, "LOAD %s\n", variableEntries[VarCntr - 1].name);
         fprintf(targetFile, "DIV ");
+        *lastUsed = 'd';
     } else if (strcmp(node->label, "^") == 0) {
-            unaryUsed = 1;
+            *unaryUsed = 1;
     } else if (strcmp(node->label, "<expr>") != 0
                 && strcmp(node->label, "<N>") != 0
                 && strcmp(node->label, "<expr'>") != 0
@@ -1413,21 +1399,43 @@ void exprTraversal(ParseNode* node, int* hasLoaded) {
 
                     if (*hasLoaded == 0) {
                         fprintf(targetFile, "LOAD %s\n", node->label);
-                        fprintf(targetFile, "STORE %s\n", variableEntries[VarCntr - 1].name);
-                        *hasLoaded = 1;
-                    }
-                    else {
-                        fprintf(targetFile, "%s\n", node->label);
-                        if (unaryUsed == 1) {
-                            unaryUsed = 0;
+                        if (*unaryUsed == 1) {
+                            *unaryUsed = 0;
                             if (strcmp(node->label, "0") == 0) {
                                 fprintf(targetFile, "ADD 1\n");
                             }
-                            if (strcmp(node->label, "1") == 0) {
+                            else if (strcmp(node->label, "1") == 0) {
                                 fprintf(targetFile, "SUB 1\n");
+                            } else {
+                                    fprintf(targetFile, "MULT -1\n");
+                                }
                             }
-                            fprintf(targetFile, "MULT -1\n");
-                        }
+
+                            fprintf(targetFile, "STORE %s\n", variableEntries[VarCntr - 1].name);
+                            *hasLoaded = 1;
+                    } else {
+                        if (*unaryUsed == 1) {
+                            *unaryUsed = 0;
+                            if (strcmp(node->label, "0") == 0) {
+                                fprintf(targetFile, "ADD 1\n");
+                            }
+                            else if (strcmp(node->label, "1") == 0) {
+                                fprintf(targetFile, "SUB 1\n");
+                            } else {
+                                if (*lastUsed == 'a') {
+                                    fprintf(targetFile, "0\n");
+                                    fprintf(targetFile, "SUB %s\n", node->label);
+                                }
+                                else if (*lastUsed == 's') {
+                                    fprintf(targetFile, "0\n");
+                                    fprintf(targetFile, "ADD %s\n", node->label);
+                                } else {
+                                    fprintf(targetFile, "MULT -1\n");
+                                }
+                            }
+                            } else {
+                                fprintf(targetFile, "%s\n", node->label);
+                            }
                         fprintf(targetFile, "STORE %s\n", variableEntries[VarCntr - 1].name);
                     }
                 }

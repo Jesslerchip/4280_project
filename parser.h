@@ -51,7 +51,7 @@ ParseNode* RO(Token* token);
 ParseNode* label(Token* token, FILE* inputFile);
 ParseNode* gotoFunc(Token* token, FILE* inputFile);
 ParseNode* pick(Token* token, FILE* inputFile);
-ParseNode* pickBody(FILE* inputFile);
-void exprTraversal(ParseNode* node, int* hasLoaded);
+ParseNode* pickBody(Token* token, FILE* inputFile);
+void exprTraversal(ParseNode* node, int* hasLoaded, int* unaryUsed, char* lastUsed);
 
 #endif
